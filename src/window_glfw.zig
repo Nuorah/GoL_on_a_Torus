@@ -72,6 +72,7 @@ pub const Window = struct {
         _ = c.glfwSetKeyCallback(self.handle, keyCallback);
         _ = c.glfwSetMouseButtonCallback(self.handle, mouseButtonCallback);
         _ = c.glfwSetCursorPosCallback(self.handle, cursorPosCallback);
+        _ = c.glfwSetScrollCallback(self.handle, scrollCallback);
         _ = c.glfwSetWindowCloseCallback(self.handle, closeCallback);
     }
 
@@ -203,6 +204,18 @@ pub const Window = struct {
                     .y = @intFromFloat(ypos),
                     .dx = @intFromFloat(dx),
                     .dy = @intFromFloat(dy),
+                },
+            },
+        });
+    }
+
+    fn scrollCallback(window: ?*c.GLFWwindow, xoffset: f64, yoffset: f64) callconv(.c) void {
+        const self = getSelf(window) orelse return;
+        self.pushEvent(.{
+            .input = .{
+                .mouse_scroll = .{
+                    .dx = @floatCast(xoffset),
+                    .dy = @floatCast(yoffset),
                 },
             },
         });

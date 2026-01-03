@@ -9,6 +9,8 @@ const Camera = @import("camera.zig").Camera;
 const torus_module = @import("torus.zig");
 const math = @import("math.zig");
 
+const Vec2 = math.Vec2;
+
 const FIXED_TIMESTEP: f32 = 1.0 / 12000.0;
 const MAX_ACCUMULATED_TIME: f32 = FIXED_TIMESTEP * 5.0;
 
@@ -79,8 +81,8 @@ pub const Game = struct {
         self.current_target = 0;
     }
 
-    pub fn update(self: *Self, delta: f32, renderer: *Renderer) void {
-        self.rotation += 0.5 * delta;
+    pub fn update(self: *Self, delta: f32, renderer: *Renderer, move_dir: Vec2, zoom: f32) void {
+        self.camera.updateOrbit(move_dir, zoom, delta);
 
         // gol simulation (fixed timestep)
         self.accumulator += delta;

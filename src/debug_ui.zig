@@ -43,6 +43,11 @@ pub const DebugUI = struct {
         c.cImGui_ImplOpenGL3_RenderDrawData(c.ImGui_GetDrawData());
     }
 
+    pub fn wantsCaptureMouse(_: *Self) bool {
+        const io = c.ImGui_GetIO();
+        return io.*.WantCaptureMouse;
+    }
+
     pub fn showStats(self: *Self, fps: f32, delta: f32) void {
         if (!self.show_stats) return;
         if (c.ImGui_Begin("Stats", &self.show_stats, 0)) {

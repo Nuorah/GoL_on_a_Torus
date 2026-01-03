@@ -1,6 +1,7 @@
 const math = @import("math.zig");
 const Mat4 = math.Mat4;
 const Vec3 = math.Vec3;
+const Vec2 = math.Vec2;
 const std = @import("std");
 
 pub const ProjectionType = enum {
@@ -12,6 +13,12 @@ pub const Camera = struct {
     position: Vec3,
     target: Vec3,
     up: Vec3,
+
+    // orbit params
+    orbit_angle_h: f32 = 0, // horizontal (around Y axis)
+    orbit_angle_v: f32 = 0.3, // vertical (pitch), start slightly above
+    orbit_distance: f32 = 15,
+    orbit_speed: f32 = 2.0,
 
     // perspective params
     fov: f32,
@@ -52,5 +59,26 @@ pub const Camera = struct {
                 break :blk Mat4.orthographic(-w, w, -h, h, self.near, self.far);
             },
         };
+    }
+
+    pub fn updateOrbit(self: *Camera, move_dir: Vec2, zoom: f32, delta: f32) void {
+        self.orbit_angle_h += move_dir.x * self.orbit_speed * delta;
+        self.orbit_angle_v += move_dir.y * self.orbit_speed * delta;
+
+        self.orbit_distance -= zoom * self.orbit_speed * 2.0 * delta;
+        self.orbit_distance = std.math.clamp(self.orbit_distance, 4.0, 50.0);
+
+        // clamp vertical to avoid gimbal lock / flipping
+        const max_pitch = std.math.pi / 2.0 - 0.1;
+        self.orbit_angle_v = std.math.clamp(self.orbit_angle_v, -max_pitch, max_pitch);
+
+        // spherical to cartesian
+        const cos_v = @cos(self.orbit_angle_v);
+        self.position = .{
+            .x = @sin(self.orbit_angle_h) * cos_v * self.orbit_distance,
+            .y = @sin(self.orbit_angle_v) * self.orbit_distance,
+            .z = @cos(self.orbit_angle_h) * cos_v * self.orbit_distance,
+        };
+        // target stays at origin (torus center)
     }
 };

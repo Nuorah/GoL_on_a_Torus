@@ -90,7 +90,19 @@ pub fn main() !void {
         if (actions.isPressed(input, .quit)) return;
         if (actions.isPressed(input, .reset)) try game.reset();
 
-        game.update(delta, &renderer);
+        var move_dir = actions.getMoveDir(input);
+
+        if (input.isMouseButtonHeld(.left) and !debug_ui.wantsCaptureMouse()) {
+            const sensitivity: f32 = 0.05;
+            move_dir.x -= @as(f32, @floatFromInt(input.mouse_dx)) * sensitivity;
+            move_dir.y += @as(f32, @floatFromInt(input.mouse_dy)) * sensitivity;
+        }
+
+        var zoom: f32 = 0;
+        if (actions.isHeld(input, .zoom_in)) zoom += 1;
+        if (actions.isHeld(input, .zoom_out)) zoom -= 1;
+        zoom += input.scroll_dy * 5;
+        game.update(delta, &renderer, move_dir, zoom);
         game.render(&renderer, &screen_target);
 
         // blit game to screen

@@ -2,12 +2,15 @@ const std = @import("std");
 const Input = @import("input.zig").Input;
 const Key = @import("input.zig").Key;
 const MouseButton = @import("input.zig").MouseButton;
+const Vec2 = @import("math.zig").Vec2;
 
 pub const Action = enum {
     move_up,
     move_down,
     move_left,
     move_right,
+    zoom_in,
+    zoom_out,
     reset,
     toggle_fullscreen,
     toggle_vsync,
@@ -34,6 +37,8 @@ pub const ActionMap = struct {
         self.bindings.set(.move_down, .{ .key = .s });
         self.bindings.set(.move_left, .{ .key = .a });
         self.bindings.set(.move_right, .{ .key = .d });
+        self.bindings.set(.zoom_in, .{ .key = .e });
+        self.bindings.set(.zoom_out, .{ .key = .q });
         self.bindings.set(.reset, .{ .key = .r });
         self.bindings.set(.toggle_fullscreen, .{ .key = .f11 });
         self.bindings.set(.toggle_vsync, .{ .key = .v });
@@ -58,7 +63,7 @@ pub const ActionMap = struct {
         };
     }
 
-    pub fn getMoveDir(self: Self, input: Input) struct { x: f32, y: f32 } {
+    pub fn getMoveDir(self: Self, input: Input) Vec2 {
         var x: f32 = 0;
         var y: f32 = 0;
 
