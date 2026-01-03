@@ -10,6 +10,7 @@ pub const Action = enum {
     move_right,
     reset,
     toggle_fullscreen,
+    toggle_vsync,
     quit,
 };
 
@@ -35,6 +36,7 @@ pub const ActionMap = struct {
         self.bindings.set(.move_right, .{ .key = .d });
         self.bindings.set(.reset, .{ .key = .r });
         self.bindings.set(.toggle_fullscreen, .{ .key = .f11 });
+        self.bindings.set(.toggle_vsync, .{ .key = .v });
         self.bindings.set(.quit, .{ .key = .escape });
 
         return self;

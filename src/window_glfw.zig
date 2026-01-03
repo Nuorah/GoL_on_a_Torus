@@ -8,7 +8,6 @@ pub const WindowEvent = union(enum) {
     none,
     quit,
     input: InputEvent,
-    resize: struct { width: u32, height: u32 },
 };
 
 pub const Window = struct {
@@ -18,12 +17,9 @@ pub const Window = struct {
     width: u32,
     height: u32,
     is_fullscreen: bool,
+    is_vsync: bool,
     saved_pos: struct { x: c_int, y: c_int },
     saved_size: struct { w: c_int, h: c_int },
-
-    // resize tracking
-    resize_pending: bool,
-    resize_cooldown: u32,
 
     // event queue for polling
     event_queue: [64]WindowEvent,
@@ -61,10 +57,9 @@ pub const Window = struct {
             .width = width,
             .height = height,
             .is_fullscreen = false,
-            .saved_pos = .{ .x = 100, .y = 100 },
+            .is_vsync = true,
+            .saved_pos = .{ .x = 0, .y = 0 },
             .saved_size = .{ .w = @intCast(width), .h = @intCast(height) },
-            .resize_pending = false,
-            .resize_cooldown = 0,
             .event_queue = undefined,
             .event_head = 0,
             .event_tail = 0,
@@ -72,12 +67,12 @@ pub const Window = struct {
     }
 
     pub fn setupCallbacks(self: *Self) void {
+        // store self pointer for callbacks
         c.glfwSetWindowUserPointer(self.handle, self);
         _ = c.glfwSetKeyCallback(self.handle, keyCallback);
         _ = c.glfwSetMouseButtonCallback(self.handle, mouseButtonCallback);
         _ = c.glfwSetCursorPosCallback(self.handle, cursorPosCallback);
         _ = c.glfwSetWindowCloseCallback(self.handle, closeCallback);
-        _ = c.glfwSetFramebufferSizeCallback(self.handle, framebufferSizeCallback);
     }
 
     pub fn deinit(self: *Self) void {
@@ -90,20 +85,11 @@ pub const Window = struct {
     }
 
     pub fn syncDimensions(self: *Self) void {
-        // process resize cooldown
-        if (self.resize_pending) {
-            if (self.resize_cooldown > 0) {
-                self.resize_cooldown -= 1;
-            } else {
-                // cooldown finished, actually apply the new dimensions
-                var w: c_int = 0;
-                var h: c_int = 0;
-                c.glfwGetFramebufferSize(self.handle, &w, &h);
-                self.width = @intCast(w);
-                self.height = @intCast(h);
-                self.resize_pending = false;
-            }
-        }
+        var w: c_int = 0;
+        var h: c_int = 0;
+        c.glfwGetFramebufferSize(self.handle, &w, &h);
+        self.width = @intCast(w);
+        self.height = @intCast(h);
     }
 
     pub fn pollEvent(self: *Self) WindowEvent {
@@ -133,10 +119,10 @@ pub const Window = struct {
                 self.saved_size.h,
                 c.GLFW_DONT_CARE,
             );
-            c.glfwRestoreWindow(self.handle);
             self.is_fullscreen = false;
         } else {
             c.glfwGetWindowPos(self.handle, &self.saved_pos.x, &self.saved_pos.y);
+            c.glfwGetWindowSize(self.handle, &self.saved_size.w, &self.saved_size.h);
 
             const monitor = c.glfwGetPrimaryMonitor();
             const mode = c.glfwGetVideoMode(monitor);
@@ -153,31 +139,21 @@ pub const Window = struct {
         }
     }
 
-    pub fn setVsync(_: *Self, enabled: bool) void {
-        c.glfwSwapInterval(if (enabled) 1 else 0);
+    pub fn toggleVsync(self: *Self) void {
+        if (self.is_vsync) {
+            c.glfwSwapInterval(0);
+            self.is_vsync = false;
+        } else {
+            c.glfwSwapInterval(1);
+            self.is_vsync = true;
+        }
     }
 
     fn pushEvent(self: *Self, event: WindowEvent) void {
         const next_head = (self.event_head + 1) % self.event_queue.len;
-        if (next_head == self.event_tail) return;
+        if (next_head == self.event_tail) return; // queue full, drop event
         self.event_queue[self.event_head] = event;
         self.event_head = next_head;
-    }
-
-    fn framebufferSizeCallback(window: ?*c.GLFWwindow, width: c_int, height: c_int) callconv(.c) void {
-        const self = getSelf(window) orelse return;
-
-        // start cooldown, don't apply dimensions yet
-        self.resize_pending = true;
-        self.resize_cooldown = 5;
-
-        // still push the event so main.zig knows a resize happened
-        self.pushEvent(.{
-            .resize = .{
-                .width = @intCast(width),
-                .height = @intCast(height),
-            },
-        });
     }
 
     fn keyCallback(window: ?*c.GLFWwindow, key: c_int, _: c_int, action: c_int, _: c_int) callconv(.c) void {

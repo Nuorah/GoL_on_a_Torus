@@ -5,6 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const glfw = buildGLFW(b, target, optimize);
+    const imgui = buildImGui(b, target, optimize);
 
     const exe = b.addExecutable(.{
         .name = "conway_game_of_torus",
@@ -15,24 +16,35 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    // glad
     exe.addCSourceFile(.{
         .file = b.path("libs/glad/glad.c"),
+        .flags = &.{},
+    });
+
+    // stb implementations
+    exe.addCSourceFile(.{
+        .file = b.path("libs/stb/stb_impl.c"),
         .flags = &.{},
     });
 
     exe.addIncludePath(b.path("libs/glad"));
     exe.addIncludePath(b.path("libs/KHR"));
     exe.addIncludePath(b.path("libs/glfw/include"));
+    exe.addIncludePath(b.path("libs/imgui"));
+    exe.addIncludePath(b.path("libs/stb"));
     exe.addIncludePath(b.path("libs"));
 
     exe.linkLibrary(glfw);
+    exe.linkLibrary(imgui);
     exe.linkLibC();
+    exe.linkLibCpp();
 
     switch (target.result.os.tag) {
         .linux => {
             exe.linkSystemLibrary("GL");
-            // wayland libs if you go that route
             exe.linkSystemLibrary("X11");
+            exe.linkSystemLibrary("m");
         },
         .windows => {
             exe.linkSystemLibrary("gdi32");
@@ -59,6 +71,40 @@ pub fn build(b: *std.Build) void {
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
+}
+
+fn buildImGui(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
+    const imgui = b.addLibrary(.{
+        .linkage = .static,
+        .name = "imgui",
+        .root_module = b.createModule(.{
+            .root_source_file = null,
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    imgui.addIncludePath(b.path("libs/imgui"));
+    imgui.addIncludePath(b.path("libs/glfw/include"));
+    imgui.addIncludePath(b.path("libs/glad"));
+    imgui.linkLibCpp();
+
+    imgui.addCSourceFiles(.{
+        .files = &.{
+            "libs/imgui/imgui.cpp",
+            "libs/imgui/imgui_demo.cpp",
+            "libs/imgui/imgui_draw.cpp",
+            "libs/imgui/imgui_tables.cpp",
+            "libs/imgui/imgui_widgets.cpp",
+            "libs/imgui/imgui_impl_glfw.cpp",
+            "libs/imgui/imgui_impl_opengl3.cpp",
+            "libs/imgui/dcimgui.cpp",
+            "libs/imgui/dcimgui_impl_glfw.cpp",
+            "libs/imgui/dcimgui_impl_opengl3.cpp",
+        },
+    });
+
+    return imgui;
 }
 
 fn buildGLFW(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
