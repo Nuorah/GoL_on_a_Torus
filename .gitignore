@@ -1,8 +1,17 @@
-# build artifacts
-nob
-nob.old
-window
+# Zig build artifacts
+zig-out/
+.zig-cache/
 
-# bear/clangd
-.cache/
-compile_commands.json
+# IntelliJ IDEA
+.idea/
+
+# OS garbage
+.DS_Store
+Thumbs.db
+
+# Build artifacts (just in case)
+*.exe
+*.pdb
+*.o
+*.lib
+*.a
