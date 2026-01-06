@@ -11,9 +11,6 @@ const math = @import("math.zig");
 
 const Vec2 = math.Vec2;
 
-const FIXED_TIMESTEP: f32 = 1.0 / 12000.0;
-const MAX_ACCUMULATED_TIME: f32 = FIXED_TIMESTEP * 5.0;
-
 pub const Game = struct {
     allocator: std.mem.Allocator,
 
@@ -22,20 +19,33 @@ pub const Game = struct {
     current_target: usize,
     texel_size: [2]f32,
     accumulator: f32,
+    frequency: f32,
+    seed: i64 = 0,
+    density: f32 = 0.05,
+    grid_resolution: u32,
+    major_radius: f32,
+    minor_radius: f32,
 
     // scene
     torus: Mesh,
     rotation: f32,
     camera: Camera,
 
-    // shaders (game owns these since they're game-specific)
+    // shaders
     basic_shader: Shader,
     gol_shader: Shader,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, aspect_ratio: f32) !Self {
-        const torus_data = try torus_module.createTorus(allocator, 512, 2.0, 1);
+    pub fn init(
+        allocator: std.mem.Allocator,
+        aspect_ratio: f32,
+        frequency: f32,
+        grid_resolution: u32,
+        major_radius: f32,
+        minor_radius: f32,
+    ) !Self {
+        const torus_data = try torus_module.createTorus(allocator, grid_resolution, major_radius, minor_radius);
         defer allocator.free(torus_data.vertices);
         defer allocator.free(torus_data.indices);
 
@@ -55,6 +65,10 @@ pub const Game = struct {
             .current_target = 0,
             .texel_size = texel_size,
             .accumulator = 0,
+            .frequency = frequency,
+            .grid_resolution = grid_resolution,
+            .major_radius = major_radius,
+            .minor_radius = minor_radius,
             .torus = Mesh.init(torus_data.vertices, torus_data.indices),
             .rotation = 0,
             .camera = Camera.init(aspect_ratio),
@@ -83,16 +97,18 @@ pub const Game = struct {
 
     pub fn update(self: *Self, delta: f32, renderer: *Renderer, move_dir: Vec2, zoom: f32) void {
         self.camera.updateOrbit(move_dir, zoom, delta);
+        const timestep = 1 / self.frequency;
+        const max_accumulated_time = timestep * 5;
 
         // gol simulation (fixed timestep)
         self.accumulator += delta;
-        if (self.accumulator > MAX_ACCUMULATED_TIME) {
-            self.accumulator = MAX_ACCUMULATED_TIME;
+        if (self.accumulator > max_accumulated_time) {
+            self.accumulator = max_accumulated_time;
         }
 
-        while (self.accumulator >= FIXED_TIMESTEP) {
+        while (self.accumulator >= timestep) {
             self.stepSimulation(renderer);
-            self.accumulator -= FIXED_TIMESTEP;
+            self.accumulator -= timestep;
         }
     }
 
@@ -134,14 +150,14 @@ pub const Game = struct {
     }
 
     fn randomizeGrid(self: *Self, target: *RenderTarget) !void {
-        var prng = std.Random.DefaultPrng.init(@intCast(std.time.milliTimestamp()));
+        var prng = std.Random.DefaultPrng.init(@intCast(self.seed));
         const random = prng.random();
 
         const pixels = try self.allocator.alloc(u8, target.width * target.height);
         defer self.allocator.free(pixels);
 
         for (pixels) |*pixel| {
-            pixel.* = if (random.boolean()) 255 else 0;
+            pixel.* = if (random.float(f32) < self.density) 255 else 0;
         }
 
         c.glBindTexture(c.GL_TEXTURE_2D, target.texture);
@@ -157,5 +173,39 @@ pub const Game = struct {
             pixels.ptr,
         );
         c.glBindTexture(c.GL_TEXTURE_2D, 0);
+    }
+
+    pub fn regenerate(self: *Self) !void {
+        // cleanup old
+        self.torus.deinit();
+        self.gol_targets[0].deinit();
+        self.gol_targets[1].deinit();
+
+        // rebuild torus
+        const torus_data = try torus_module.createTorus(
+            self.allocator,
+            self.grid_resolution,
+            self.major_radius,
+            self.minor_radius,
+        );
+        defer self.allocator.free(torus_data.vertices);
+        defer self.allocator.free(torus_data.indices);
+
+        self.torus = Mesh.init(torus_data.vertices, torus_data.indices);
+
+        // rebuild render targets
+        self.gol_targets = .{
+            RenderTarget.init(torus_data.grid_width, torus_data.grid_height, .r8, false),
+            RenderTarget.init(torus_data.grid_width, torus_data.grid_height, .r8, false),
+        };
+
+        self.texel_size = .{
+            1.0 / @as(f32, @floatFromInt(torus_data.grid_width)),
+            1.0 / @as(f32, @floatFromInt(torus_data.grid_height)),
+        };
+
+        // randomize with density
+        self.current_target = 0;
+        try self.randomizeGrid(&self.gol_targets[0]);
     }
 };

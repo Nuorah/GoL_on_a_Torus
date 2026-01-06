@@ -13,173 +13,307 @@ pub const WindowEvent = union(enum) {
 pub const Window = struct {
     const Self = @This();
 
-    handle: *c.RGFW_window,
+    handle: *c.GLFWwindow,
     width: u32,
     height: u32,
     is_fullscreen: bool,
+    is_vsync: bool,
+    saved_pos: struct { x: c_int, y: c_int },
+    saved_size: struct { w: c_int, h: c_int },
+
+    // event queue for polling
+    event_queue: [64]WindowEvent,
+    event_head: usize,
+    event_tail: usize,
 
     pub fn init(width: u32, height: u32, title: [*:0]const u8) !Self {
-        const window = c.RGFW_createWindow(
-            title,
-            0,
-            0,
+        if (c.glfwInit() == c.GLFW_FALSE) {
+            std.debug.print("failed to init glfw\n", .{});
+            return error.GLFWInitFailed;
+        }
+
+        c.glfwWindowHint(c.GLFW_CONTEXT_VERSION_MAJOR, 3);
+        c.glfwWindowHint(c.GLFW_CONTEXT_VERSION_MINOR, 3);
+        c.glfwWindowHint(c.GLFW_OPENGL_PROFILE, c.GLFW_OPENGL_CORE_PROFILE);
+
+        const window = c.glfwCreateWindow(
             @intCast(width),
             @intCast(height),
-            c.RGFW_windowCenter | c.RGFW_windowOpenGL,
+            title,
+            null,
+            null,
         );
 
         if (window == null) {
             std.debug.print("failed to create window\n", .{});
+            c.glfwTerminate();
             return error.WindowCreationFailed;
         }
+
+        c.glfwMakeContextCurrent(window);
 
         return Self{
             .handle = window.?,
             .width = width,
             .height = height,
             .is_fullscreen = false,
+            .is_vsync = true,
+            .saved_pos = .{ .x = 0, .y = 0 },
+            .saved_size = .{ .w = @intCast(width), .h = @intCast(height) },
+            .event_queue = undefined,
+            .event_head = 0,
+            .event_tail = 0,
         };
+    }
+
+    pub fn setupCallbacks(self: *Self) void {
+        // store self pointer for callbacks
+        c.glfwSetWindowUserPointer(self.handle, self);
+        _ = c.glfwSetKeyCallback(self.handle, keyCallback);
+        _ = c.glfwSetMouseButtonCallback(self.handle, mouseButtonCallback);
+        _ = c.glfwSetCursorPosCallback(self.handle, cursorPosCallback);
+        _ = c.glfwSetScrollCallback(self.handle, scrollCallback);
+        _ = c.glfwSetWindowCloseCallback(self.handle, closeCallback);
     }
 
     pub fn deinit(self: *Self) void {
-        c.RGFW_window_close(self.handle);
+        c.glfwDestroyWindow(self.handle);
+        c.glfwTerminate();
     }
 
     pub fn shouldClose(self: *Self) bool {
-        return c.RGFW_window_shouldClose(self.handle) == c.RGFW_TRUE;
+        return c.glfwWindowShouldClose(self.handle) == c.GLFW_TRUE;
     }
 
     pub fn syncDimensions(self: *Self) void {
-        self.width = @intCast(self.handle.*.w);
-        self.height = @intCast(self.handle.*.h);
+        var w: c_int = 0;
+        var h: c_int = 0;
+        c.glfwGetFramebufferSize(self.handle, &w, &h);
+        self.width = @intCast(w);
+        self.height = @intCast(h);
     }
 
     pub fn pollEvent(self: *Self) WindowEvent {
-        var event: c.RGFW_event = undefined;
-        if (c.RGFW_window_checkEvent(self.handle, &event) == c.RGFW_FALSE) {
-            return .none;
+        c.glfwPollEvents();
+
+        if (self.event_head != self.event_tail) {
+            const event = self.event_queue[self.event_tail];
+            self.event_tail = (self.event_tail + 1) % self.event_queue.len;
+            return event;
         }
 
-        return switch (event.type) {
-            c.RGFW_quit => .quit,
-            c.RGFW_keyPressed => .{ .input = .{ .key_down = translateKey(event.key.value) } },
-            c.RGFW_keyReleased => .{ .input = .{ .key_up = translateKey(event.key.value) } },
-            c.RGFW_mouseButtonPressed => .{ .input = .{ .mouse_down = translateMouseButton(event.button.value) } },
-            c.RGFW_mouseButtonReleased => .{ .input = .{ .mouse_up = translateMouseButton(event.button.value) } },
-            c.RGFW_mousePosChanged => .{
-                .input = .{
-                    .mouse_moved = .{
-                        .x = event.mouse.x,
-                        .y = event.mouse.y,
-                        .dx = @intFromFloat(event.mouse.vecX),
-                        .dy = @intFromFloat(event.mouse.vecY),
-                    },
-                },
-            },
-            else => .none,
-        };
+        return .none;
     }
 
     pub fn swapBuffers(self: *Self) void {
-        c.RGFW_window_swapBuffers_OpenGL(self.handle);
+        c.glfwSwapBuffers(self.handle);
     }
 
     pub fn toggleFullscreen(self: *Self) void {
-        if (c.RGFW_window_isFullscreen(self.handle) == c.RGFW_TRUE) {
-            c.RGFW_window_setFullscreen(self.handle, c.RGFW_FALSE);
+        if (self.is_fullscreen) {
+            c.glfwSetWindowMonitor(
+                self.handle,
+                null,
+                self.saved_pos.x,
+                self.saved_pos.y,
+                self.saved_size.w,
+                self.saved_size.h,
+                c.GLFW_DONT_CARE,
+            );
             self.is_fullscreen = false;
         } else {
-            c.RGFW_window_setFullscreen(self.handle, c.RGFW_TRUE);
+            c.glfwGetWindowPos(self.handle, &self.saved_pos.x, &self.saved_pos.y);
+            c.glfwGetWindowSize(self.handle, &self.saved_size.w, &self.saved_size.h);
+
+            const monitor = c.glfwGetPrimaryMonitor();
+            const mode = c.glfwGetVideoMode(monitor);
+            c.glfwSetWindowMonitor(
+                self.handle,
+                monitor,
+                0,
+                0,
+                mode.*.width,
+                mode.*.height,
+                mode.*.refreshRate,
+            );
             self.is_fullscreen = true;
         }
     }
 
-    pub fn setVsync(self: *Self, enabled: bool) void {
-        _ = self;
-        c.RGFW_window_swapInterval(if (enabled) 1 else 0);
+    pub fn toggleVsync(self: *Self) void {
+        if (self.is_vsync) {
+            c.glfwSwapInterval(0);
+            self.is_vsync = false;
+        } else {
+            c.glfwSwapInterval(1);
+            self.is_vsync = true;
+        }
+    }
+
+    fn pushEvent(self: *Self, event: WindowEvent) void {
+        const next_head = (self.event_head + 1) % self.event_queue.len;
+        if (next_head == self.event_tail) return; // queue full, drop event
+        self.event_queue[self.event_head] = event;
+        self.event_head = next_head;
+    }
+
+    fn keyCallback(window: ?*c.GLFWwindow, key: c_int, _: c_int, action: c_int, _: c_int) callconv(.c) void {
+        const self = getSelf(window) orelse return;
+        const translated = translateKey(key);
+
+        if (action == c.GLFW_PRESS) {
+            self.pushEvent(.{ .input = .{ .key_down = translated } });
+        } else if (action == c.GLFW_RELEASE) {
+            self.pushEvent(.{ .input = .{ .key_up = translated } });
+        }
+    }
+
+    fn mouseButtonCallback(window: ?*c.GLFWwindow, button: c_int, action: c_int, _: c_int) callconv(.c) void {
+        const self = getSelf(window) orelse return;
+        const translated = translateMouseButton(button);
+
+        if (action == c.GLFW_PRESS) {
+            self.pushEvent(.{ .input = .{ .mouse_down = translated } });
+        } else if (action == c.GLFW_RELEASE) {
+            self.pushEvent(.{ .input = .{ .mouse_up = translated } });
+        }
+    }
+
+    var last_mouse_x: f64 = 0;
+    var last_mouse_y: f64 = 0;
+    var first_mouse: bool = true;
+
+    fn cursorPosCallback(window: ?*c.GLFWwindow, xpos: f64, ypos: f64) callconv(.c) void {
+        const self = getSelf(window) orelse return;
+
+        if (first_mouse) {
+            last_mouse_x = xpos;
+            last_mouse_y = ypos;
+            first_mouse = false;
+        }
+
+        const dx = xpos - last_mouse_x;
+        const dy = ypos - last_mouse_y;
+        last_mouse_x = xpos;
+        last_mouse_y = ypos;
+
+        self.pushEvent(.{
+            .input = .{
+                .mouse_moved = .{
+                    .x = @intFromFloat(xpos),
+                    .y = @intFromFloat(ypos),
+                    .dx = @intFromFloat(dx),
+                    .dy = @intFromFloat(dy),
+                },
+            },
+        });
+    }
+
+    fn scrollCallback(window: ?*c.GLFWwindow, xoffset: f64, yoffset: f64) callconv(.c) void {
+        const self = getSelf(window) orelse return;
+        self.pushEvent(.{
+            .input = .{
+                .mouse_scroll = .{
+                    .dx = @floatCast(xoffset),
+                    .dy = @floatCast(yoffset),
+                },
+            },
+        });
+    }
+
+    fn closeCallback(window: ?*c.GLFWwindow) callconv(.c) void {
+        const self = getSelf(window) orelse return;
+        self.pushEvent(.quit);
+    }
+
+    fn getSelf(window: ?*c.GLFWwindow) ?*Self {
+        if (window) |w| {
+            return @ptrCast(@alignCast(c.glfwGetWindowUserPointer(w)));
+        }
+        return null;
     }
 };
 
-fn translateKey(rgfw_key: u8) Key {
-    return switch (rgfw_key) {
-        c.RGFW_a => .a,
-        c.RGFW_b => .b,
-        c.RGFW_c => .c,
-        c.RGFW_d => .d,
-        c.RGFW_e => .e,
-        c.RGFW_f => .f,
-        c.RGFW_g => .g,
-        c.RGFW_h => .h,
-        c.RGFW_i => .i,
-        c.RGFW_j => .j,
-        c.RGFW_k => .k,
-        c.RGFW_l => .l,
-        c.RGFW_m => .m,
-        c.RGFW_n => .n,
-        c.RGFW_o => .o,
-        c.RGFW_p => .p,
-        c.RGFW_q => .q,
-        c.RGFW_r => .r,
-        c.RGFW_s => .s,
-        c.RGFW_t => .t,
-        c.RGFW_u => .u,
-        c.RGFW_v => .v,
-        c.RGFW_w => .w,
-        c.RGFW_x => .x,
-        c.RGFW_y => .y,
-        c.RGFW_z => .z,
-        c.RGFW_0 => .@"0",
-        c.RGFW_1 => .@"1",
-        c.RGFW_2 => .@"2",
-        c.RGFW_3 => .@"3",
-        c.RGFW_4 => .@"4",
-        c.RGFW_5 => .@"5",
-        c.RGFW_6 => .@"6",
-        c.RGFW_7 => .@"7",
-        c.RGFW_8 => .@"8",
-        c.RGFW_9 => .@"9",
-        c.RGFW_F1 => .f1,
-        c.RGFW_F2 => .f2,
-        c.RGFW_F3 => .f3,
-        c.RGFW_F4 => .f4,
-        c.RGFW_F5 => .f5,
-        c.RGFW_F6 => .f6,
-        c.RGFW_F7 => .f7,
-        c.RGFW_F8 => .f8,
-        c.RGFW_F9 => .f9,
-        c.RGFW_F10 => .f10,
-        c.RGFW_F11 => .f11,
-        c.RGFW_F12 => .f12,
-        c.RGFW_escape => .escape,
-        c.RGFW_return => .enter,
-        c.RGFW_space => .space,
-        c.RGFW_backSpace => .backspace,
-        c.RGFW_tab => .tab,
-        c.RGFW_shiftL => .left_shift,
-        c.RGFW_shiftR => .right_shift,
-        c.RGFW_controlL => .left_ctrl,
-        c.RGFW_controlR => .right_ctrl,
-        c.RGFW_altL => .left_alt,
-        c.RGFW_altR => .right_alt,
-        c.RGFW_up => .up,
-        c.RGFW_down => .down,
-        c.RGFW_left => .left,
-        c.RGFW_right => .right,
-        c.RGFW_home => .home,
-        c.RGFW_end => .end,
-        c.RGFW_pageUp => .page_up,
-        c.RGFW_pageDown => .page_down,
-        c.RGFW_insert => .insert,
-        c.RGFW_delete => .delete,
+fn translateKey(glfw_key: c_int) Key {
+    return switch (glfw_key) {
+        c.GLFW_KEY_A => .a,
+        c.GLFW_KEY_B => .b,
+        c.GLFW_KEY_C => .c,
+        c.GLFW_KEY_D => .d,
+        c.GLFW_KEY_E => .e,
+        c.GLFW_KEY_F => .f,
+        c.GLFW_KEY_G => .g,
+        c.GLFW_KEY_H => .h,
+        c.GLFW_KEY_I => .i,
+        c.GLFW_KEY_J => .j,
+        c.GLFW_KEY_K => .k,
+        c.GLFW_KEY_L => .l,
+        c.GLFW_KEY_M => .m,
+        c.GLFW_KEY_N => .n,
+        c.GLFW_KEY_O => .o,
+        c.GLFW_KEY_P => .p,
+        c.GLFW_KEY_Q => .q,
+        c.GLFW_KEY_R => .r,
+        c.GLFW_KEY_S => .s,
+        c.GLFW_KEY_T => .t,
+        c.GLFW_KEY_U => .u,
+        c.GLFW_KEY_V => .v,
+        c.GLFW_KEY_W => .w,
+        c.GLFW_KEY_X => .x,
+        c.GLFW_KEY_Y => .y,
+        c.GLFW_KEY_Z => .z,
+        c.GLFW_KEY_0 => .@"0",
+        c.GLFW_KEY_1 => .@"1",
+        c.GLFW_KEY_2 => .@"2",
+        c.GLFW_KEY_3 => .@"3",
+        c.GLFW_KEY_4 => .@"4",
+        c.GLFW_KEY_5 => .@"5",
+        c.GLFW_KEY_6 => .@"6",
+        c.GLFW_KEY_7 => .@"7",
+        c.GLFW_KEY_8 => .@"8",
+        c.GLFW_KEY_9 => .@"9",
+        c.GLFW_KEY_F1 => .f1,
+        c.GLFW_KEY_F2 => .f2,
+        c.GLFW_KEY_F3 => .f3,
+        c.GLFW_KEY_F4 => .f4,
+        c.GLFW_KEY_F5 => .f5,
+        c.GLFW_KEY_F6 => .f6,
+        c.GLFW_KEY_F7 => .f7,
+        c.GLFW_KEY_F8 => .f8,
+        c.GLFW_KEY_F9 => .f9,
+        c.GLFW_KEY_F10 => .f10,
+        c.GLFW_KEY_F11 => .f11,
+        c.GLFW_KEY_F12 => .f12,
+        c.GLFW_KEY_ESCAPE => .escape,
+        c.GLFW_KEY_ENTER => .enter,
+        c.GLFW_KEY_SPACE => .space,
+        c.GLFW_KEY_BACKSPACE => .backspace,
+        c.GLFW_KEY_TAB => .tab,
+        c.GLFW_KEY_LEFT_SHIFT => .left_shift,
+        c.GLFW_KEY_RIGHT_SHIFT => .right_shift,
+        c.GLFW_KEY_LEFT_CONTROL => .left_ctrl,
+        c.GLFW_KEY_RIGHT_CONTROL => .right_ctrl,
+        c.GLFW_KEY_LEFT_ALT => .left_alt,
+        c.GLFW_KEY_RIGHT_ALT => .right_alt,
+        c.GLFW_KEY_UP => .up,
+        c.GLFW_KEY_DOWN => .down,
+        c.GLFW_KEY_LEFT => .left,
+        c.GLFW_KEY_RIGHT => .right,
+        c.GLFW_KEY_HOME => .home,
+        c.GLFW_KEY_END => .end,
+        c.GLFW_KEY_PAGE_UP => .page_up,
+        c.GLFW_KEY_PAGE_DOWN => .page_down,
+        c.GLFW_KEY_INSERT => .insert,
+        c.GLFW_KEY_DELETE => .delete,
         else => .unknown,
     };
 }
 
-fn translateMouseButton(rgfw_button: u8) MouseButton {
-    return switch (rgfw_button) {
-        c.RGFW_mouseLeft => .left,
-        c.RGFW_mouseRight => .right,
-        c.RGFW_mouseMiddle => .middle,
+fn translateMouseButton(glfw_button: c_int) MouseButton {
+    return switch (glfw_button) {
+        c.GLFW_MOUSE_BUTTON_LEFT => .left,
+        c.GLFW_MOUSE_BUTTON_RIGHT => .right,
+        c.GLFW_MOUSE_BUTTON_MIDDLE => .middle,
         else => .left,
     };
 }

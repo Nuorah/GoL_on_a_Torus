@@ -1,7 +1,7 @@
 // main.zig
 const std = @import("std");
 const c = @import("c.zig").c;
-const Window = @import("window_glfw.zig").Window;
+const Window = @import("window.zig").Window;
 const Input = @import("input.zig").Input;
 const ActionMap = @import("action.zig").ActionMap;
 const Renderer = @import("renderer.zig").Renderer;
@@ -18,38 +18,41 @@ const RENDER_HEIGHT: f32 = 1080;
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
 
-    var win = try Window.init(WINDOW_WIDTH, WINDOW_HEIGHT, "hello zig");
+    // Init window
+    var win = try Window.init(WINDOW_WIDTH, WINDOW_HEIGHT, "GoL on a torus");
     defer win.deinit();
     win.setupCallbacks();
-
-    var input = Input.init();
-    const actions = ActionMap.init();
 
     if (c.gladLoadGL() == 0) {
         std.debug.print("failed to load GL\n", .{});
         return error.GLLoadFailed;
     }
 
-    // ========== IMGUI INIT ==========
+    // Init input
+    var input = Input.init();
+    const actions = ActionMap.init();
+
+    // Init debug ui
     var debug_ui = DebugUI.init(win.handle);
     defer debug_ui.deinit();
-    // ================================
 
+    // Init renderer
     var renderer = Renderer.init();
     defer renderer.deinit();
 
+    // Target on which we render the whole thing, and its shader
     const screen_target = RenderTarget.init(@intFromFloat(RENDER_WIDTH), @intFromFloat(RENDER_HEIGHT), .rgb, true);
     defer screen_target.deinit();
 
     const blit_shader = try Shader.init(allocator, "blit", "shaders/blit.vert", "shaders/blit.frag");
     defer blit_shader.deinit();
 
-    var game = try Game.init(allocator, RENDER_WIDTH / RENDER_HEIGHT);
+    // Init game logic
+    var game = try Game.init(allocator, RENDER_WIDTH / RENDER_HEIGHT, 1.0, 512, 2, 1);
     defer game.deinit();
 
     var last_time: i64 = std.time.milliTimestamp();
 
-    // fps tracking
     var fps: f32 = 0;
     var frame_count: u32 = 0;
     var fps_timer: f32 = 0;
@@ -59,7 +62,6 @@ pub fn main() !void {
         const delta: f32 = @as(f32, @floatFromInt(current_time - last_time)) / 1000.0;
         last_time = current_time;
 
-        // fps calculation
         frame_count += 1;
         fps_timer += delta;
         if (fps_timer >= 1.0) {
@@ -68,6 +70,7 @@ pub fn main() !void {
             fps_timer = 0;
         }
 
+        // INPUT
         input.newFrame();
         while (true) {
             switch (win.pollEvent()) {
@@ -102,10 +105,12 @@ pub fn main() !void {
         if (actions.isHeld(input, .zoom_in)) zoom += 1;
         if (actions.isHeld(input, .zoom_out)) zoom -= 1;
         zoom += input.scroll_dy * 5;
+
+        // GAME UPDATE
         game.update(delta, &renderer, move_dir, zoom);
+        // GAME RENDER
         game.render(&renderer, &screen_target);
 
-        // blit game to screen
         renderer.bindDefaultFramebuffer();
         renderer.clearScreen(0.0, 0.0, 0.0);
         win.syncDimensions();
@@ -118,11 +123,11 @@ pub fn main() !void {
         screen_target.bindTexture(0);
         renderer.drawFullscreenQuad();
 
-        // ========== IMGUI FRAME ==========
         debug_ui.beginFrame();
         debug_ui.showStats(fps, delta);
+        debug_ui.parameters(&game);
+        debug_ui.regenerate(&game);
         debug_ui.endFrame();
-        // =================================
 
         win.swapBuffers();
     }

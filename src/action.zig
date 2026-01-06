@@ -32,7 +32,6 @@ pub const ActionMap = struct {
             .bindings = std.EnumArray(Action, ?Binding).initFill(null),
         };
 
-        // defaults
         self.bindings.set(.move_up, .{ .key = .w });
         self.bindings.set(.move_down, .{ .key = .s });
         self.bindings.set(.move_left, .{ .key = .a });

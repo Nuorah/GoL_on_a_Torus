@@ -1,9 +1,8 @@
-// debug_ui.zig
 const std = @import("std");
 const c = @import("c.zig").c;
+const Game = @import("game.zig").Game;
 
 pub const DebugUI = struct {
-    // any state you need later goes here
     show_stats: bool = true,
 
     const Self = @This();
@@ -56,6 +55,39 @@ pub const DebugUI = struct {
             c.ImGui_Text("%s", fps_str.ptr);
             const dt_str = std.fmt.bufPrintZ(&buf, "dt: {d:.2}ms", .{delta * 1000.0}) catch "dt: ???";
             c.ImGui_Text("%s", dt_str.ptr);
+        }
+        c.ImGui_End();
+    }
+
+    pub fn parameters(_: *Self, game: *Game) void {
+        if (c.ImGui_Begin("Parameters", null, 0)) {
+            c.ImGui_PushItemWidth(80);
+            _ = c.ImGui_DragFloatEx("steps per second", &game.frequency, 1, 0, 60, "%.0f", 0);
+            c.ImGui_PopItemWidth();
+        }
+        c.ImGui_End();
+    }
+
+    pub fn regenerate(_: *Self, game: *Game) void {
+        if (c.ImGui_Begin("Regenerate", null, 0)) {
+            c.ImGui_SetNextItemWidth(100);
+            _ = c.ImGui_DragIntEx("seed", @ptrCast(&game.seed), 1, 64, 8192, "%d", 0);
+
+            c.ImGui_SetNextItemWidth(100);
+            _ = c.ImGui_DragIntEx("resolution", @ptrCast(&game.grid_resolution), 1, 64, 2048, "%d", 0);
+
+            c.ImGui_SetNextItemWidth(100);
+            _ = c.ImGui_DragFloatEx("major radius", &game.major_radius, 0.1, 0.5, 10.0, "%.1f", 0);
+
+            c.ImGui_SetNextItemWidth(100);
+            _ = c.ImGui_DragFloatEx("minor radius", &game.minor_radius, 0.1, 0.1, 5.0, "%.1f", 0);
+
+            c.ImGui_SetNextItemWidth(100);
+            _ = c.ImGui_DragFloatEx("fill %", &game.density, 0.01, 0.0, 1.0, "%.2f", 0);
+
+            if (c.ImGui_Button("Regenerate")) {
+                game.regenerate() catch {};
+            }
         }
         c.ImGui_End();
     }

@@ -63,8 +63,6 @@ pub const Renderer = struct {
         c.glDeleteBuffers(1, &self.screen_quad_vbo);
     }
 
-    // === state management ===
-
     pub fn setDepthTest(self: *Self, enabled: bool) void {
         _ = self;
         if (enabled) {
@@ -98,16 +96,12 @@ pub const Renderer = struct {
         }
     }
 
-    // === drawing ===
-
     pub fn drawFullscreenQuad(self: *Self) void {
         c.glBindVertexArray(self.screen_quad_vao);
         c.glDrawArrays(c.GL_TRIANGLES, 0, 6);
         c.glBindVertexArray(0);
     }
 
-    // === screen/window stuff ===
-    //
     pub fn calculateViewport(window_w: u32, window_h: u32, render_w: f32, render_h: f32) struct { x: c.GLint, y: c.GLint, w: u32, h: u32 } {
         const window_aspect = @as(f32, @floatFromInt(window_w)) / @as(f32, @floatFromInt(window_h));
         const render_aspect = render_w / render_h;

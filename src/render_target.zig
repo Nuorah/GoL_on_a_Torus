@@ -3,8 +3,8 @@ const c = @import("c.zig").c;
 pub const TextureFormat = enum {
     rgb, // standard color
     rgba, // color + alpha
-    r8, // single channel (GoL, masks, etc)
-    depth, // depth-only (shadow maps)
+    r8, // single channel
+    depth, // depth-only
 };
 
 pub const RenderTarget = struct {
@@ -27,7 +27,6 @@ pub const RenderTarget = struct {
         c.glBindTexture(c.GL_TEXTURE_2D, texture);
 
         if (format == .depth) {
-            // depth-only: texture IS the depth buffer
             c.glTexImage2D(
                 c.GL_TEXTURE_2D,
                 0,
@@ -50,7 +49,6 @@ pub const RenderTarget = struct {
             c.glDrawBuffer(c.GL_NONE);
             c.glReadBuffer(c.GL_NONE);
         } else {
-            // color texture
             const internal_format: c.GLint = switch (format) {
                 .rgb => c.GL_RGB,
                 .rgba => c.GL_RGBA,
